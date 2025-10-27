@@ -1,18 +1,22 @@
 import psycopg2
 from faker import Faker
 import random as rand
+from dotenv import load_dotenv
+import os
 
 
 ###############################################
 ############### DATABASE CONFIG ###############
 ###############################################
 
+load_dotenv()
+
 connection_params = {
-    "dbname": "app_db",
-    "user": "admin",
-    "password": "admin123",
-    "host": "172.17.112.1",
-    "port": 5432,
+    "dbname": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "host": os.getenv("DB_HOST"),
+    "port": os.getenv("DB_PORT"),
 }
 
 connection = psycopg2.connect(**connection_params)
