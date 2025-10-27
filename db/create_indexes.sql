@@ -112,3 +112,50 @@ create index on parsing_job (status);
  Execution Time: 1.583 ms
  (4 rows)
  */
+
+explain analyze select create_stat_report(43546);
+/*                                       QUERY PLAN
+----------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=4) (actual time=932.672..932.672 rows=1 loops=1)
+ Planning Time: 0.019 ms
+ Execution Time: 932.684 ms
+(3 rows)
+*/
+
+create index on feedback_object (stars_rating);
+create index on feedback_object (feedback_state);
+
+explain analyze select create_stat_report(43546);
+/*                                        QUERY PLAN
+------------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=4) (actual time=2164.870..2164.870 rows=1 loops=1)
+ Planning Time: 0.017 ms
+ Execution Time: 2164.882 ms
+(3 rows)
+*/
+drop index feedback_object_feedback_state_idx;
+drop index feedback_object_stars_rating_idxq;
+
+create index on feedback_object using hash (stars_rating);
+create index on feedback_object using hash  (feedback_state);
+
+explain analyze select create_stat_report(43546);
+/*                                        QUERY PLAN
+------------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=4) (actual time=1010.926..1010.926 rows=1 loops=1)
+ Planning Time: 0.027 ms
+ Execution Time: 1018.133 ms
+(3 rows)
+*/
+drop index feedback_object_feedback_state_idx;
+drop index feedback_object_stars_rating_idxq;
+
+create index on feedback_object (parsing_job_id);
+explain analyze select create_stat_report(43546);
+/*                                     QUERY PLAN
+------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=4) (actual time=0.946..0.946 rows=1 loops=1)
+ Planning Time: 0.017 ms
+ Execution Time: 0.956 ms
+(3 rows)
+*/

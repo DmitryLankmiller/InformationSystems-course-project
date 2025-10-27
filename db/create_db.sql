@@ -212,7 +212,7 @@ BEGIN
         UPDATE parsing_link SET is_parsed = FALSE WHERE parsing_job_id = NEW.id;
         DELETE FROM ai_report WHERE parsing_job_id = NEW.id;
         DELETE FROM statistical_report WHERE parsing_job_id = NEW.id;
-        DELETE FROM liked_cards WHERE parsing_job_id = NEW.id;
+        DELETE FROM card_object WHERE parsing_job_id = NEW.id;
     END IF;
     RETURN NEW;
 END;
@@ -221,3 +221,92 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER reset_init_status
 AFTER UPDATE OF status ON parsing_job
 FOR EACH ROW EXECUTE FUNCTION clear_collected_objects_if_set_init_status();
+
+
+CREATE OR REPLACE FUNCTION create_stat_report(pj_id INTEGER)
+RETURNS INTEGER AS $$
+DECLARE
+    total_count INTEGER;
+    stat_report_id INTEGER;
+    star_1_c INTEGER;
+    star_2_c INTEGER;
+    star_3_c INTEGER;
+    star_4_c INTEGER;
+    star_5_c INTEGER;
+    purchased_state_count INTEGER;
+    returned_state_count INTEGER;
+    canceled_state_count INTEGER;
+BEGIN
+    SELECT COUNT(*)
+    INTO total_count
+    FROM feedback_object f
+    WHERE parsing_job_id = pj_id;
+
+    IF total_count = 0 THEN
+        RAISE EXCEPTION 'Cannot create statistical_report: no feedbacks for parsing_job_id=%', pj_id;
+    END IF;
+
+
+    INSERT INTO statistical_report (parsing_job_id, feedbacks_count)
+    VALUES (pj_id, total_count)
+    RETURNING id INTO stat_report_id;
+
+
+    SELECT
+        COUNT(*) FILTER (WHERE stars_rating = 1),
+        COUNT(*) FILTER (WHERE stars_rating = 2),
+        COUNT(*) FILTER (WHERE stars_rating = 3),
+        COUNT(*) FILTER (WHERE stars_rating = 4),
+        COUNT(*) FILTER (WHERE stars_rating = 5)
+    INTO
+        star_1_c,
+        star_2_c,
+        star_3_c,
+        star_4_c,
+        star_5_c
+    FROM feedback_object
+    WHERE parsing_job_id = pj_id;
+
+    INSERT INTO stars_count (
+        statistical_report_id,
+        star_1_count,
+        star_2_count,
+        star_3_count,
+        star_4_count,
+        star_5_count
+    ) VALUES (
+        stat_report_id,
+        star_1_c,
+        star_2_c,
+        star_3_c,
+        star_4_c,
+        star_5_c
+    );
+
+    SELECT
+        COUNT(*) FILTER (WHERE feedback_state = 'purchased'),
+        COUNT(*) FILTER (WHERE feedback_state = 'returned'),
+        COUNT(*) FILTER (WHERE feedback_state = 'canceled')
+    INTO
+        purchased_state_count,
+        returned_state_count,
+        canceled_state_count
+    FROM feedback_object
+    WHERE parsing_job_id = pj_id;
+
+
+    INSERT INTO feedback_states_count (
+        statistical_report_id,
+        purchased_count,
+        returned_count,
+        canceled_count
+    ) VALUES (
+        stat_report_id,
+        purchased_state_count,
+        returned_state_count,
+        canceled_state_count
+    );
+
+    RETURN stat_report_id;
+END;
+$$ LANGUAGE plpgsql;
