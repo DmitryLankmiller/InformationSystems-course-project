@@ -44,6 +44,18 @@ where name like '%Олег%';
  Execution Time: 1.490 ms
  (5 rows)
  */
+
+
+ /*
+%aa%
+
+          bcc
+   bca           cbdaa
+ba     bcb     ca       cd
+
+
+
+ */
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX app_user_name_index ON app_user USING gin (name gin_trgm_ops);
 /*                                                          QUERY PLAN
@@ -159,3 +171,60 @@ explain analyze select create_stat_report(43546);
  Execution Time: 0.956 ms
 (3 rows)
 */
+
+
+app_db=# explain analyze select * from app_user where name like 'Se%';
+                                                QUERY PLAN
+-----------------------------------------------------------------------------------------------------------
+ Seq Scan on app_user  (cost=0.00..7749.52 rows=4 width=1407) (actual time=13.351..20.139 rows=72 loops=1)
+   Filter: (name ~~ 'Se%'::text)
+   Rows Removed by Filter: 39090
+ Planning Time: 0.376 ms
+ Execution Time: 20.187 ms
+(5 rows)
+
+app_db=# create index on app_user(name);
+CREATE INDEX
+app_db=# explain analyze select * from app_user where name like 'Se%';
+                                                QUERY PLAN
+-----------------------------------------------------------------------------------------------------------
+ Seq Scan on app_user  (cost=0.00..7749.52 rows=4 width=1407) (actual time=12.709..19.322 rows=72 loops=1)
+   Filter: (name ~~ 'Se%'::text)
+   Rows Removed by Filter: 39090
+ Planning Time: 0.435 ms
+ Execution Time: 19.353 ms
+(5 rows)
+
+app_db=# drop index app_user_name_idx;
+DROP INDEX
+
+app_db=# create index on app_user using gin (name gin_trgm_ops);
+CREATE INDEX
+
+app_db=# explain analyze select * from app_user where name like 'Se%';
+                                                         QUERY PLAN
+----------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on app_user  (cost=21.52..37.29 rows=4 width=1407) (actual time=0.132..0.330 rows=72 loops=1)
+   Recheck Cond: (name ~~ 'Se%'::text)
+   Rows Removed by Index Recheck: 22
+   Heap Blocks: exact=90
+   ->  Bitmap Index Scan on app_user_name_idx  (cost=0.00..21.52 rows=4 width=0) (actual time=0.094..0.095 rows=94 loops=1)
+         Index Cond: (name ~~ 'Se%'::text)
+ Planning Time: 0.357 ms
+ Execution Time: 0.377 ms
+(8 rows)
+
+-- SET enable_indexscan = ON;
+-- SET enable_bitmapscan = ON;
+-- SET enable_seqscan = ON;
+
+-- NoSeqScan(app_user)
+
+explain analyze /*+ IndexScan(app_user app_user_name_idx) */ select * from app_user where name like 'Se%';
+explain analyze /*+ IndexOnlyScan(app_user app_user_name_idx) */ select * from app_user where name like 'Se%';
+explain analyze /*+ BitmapScan(app_user) */ select * from app_user where name like 'Se%';
+
+
+% в начале, % в конце - разница в контексте индексов
+Почему btree медленее gin/gist
+Почему не получается заставить делать поиск по индексу?
