@@ -1,2 +1,4 @@
 .env
 pgdata/
+minio_data/
+node_modules/

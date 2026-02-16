@@ -1,20 +1,53 @@
 services:
   db:
     image: postgres:16
+    mem_limit: 2g
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_DATABASE_NAME}
       PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - '${DB_PORT}:5432'
-    volumes:
-      - ./db/pgdata:/var/lib/postgresql/data/pgdata
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -d ${DB_DATABASE_NAME} -U ${DB_USER}']
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER} -h localhost || exit 1']
       interval: 5s
       timeout: 5s
       retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: '-Xms128m -Xmx128m'
+    ports:
+      - '2181:2181'
+    restart: unless-stopped
+    mem_limit: 256m
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      - zookeeper
+    ports:
+      - '9092:9092'
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_HEAP_OPTS: '-Xms256m -Xmx512m'
+    restart: unless-stopped
+    mem_limit: 1500m
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -35,8 +68,149 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+    restart: unless-stopped
+    mem_limit: 700m
+
+  keycloak-db:
+    image: postgres:16
+    mem_limit: 1g
+    environment:
+      POSTGRES_DB: ${KC_DB_NAME:-keycloak}
+      POSTGRES_USER: ${KC_DB_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:-keycloak}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${KC_DB_USER:-keycloak} -d ${KC_DB_NAME:-keycloak} -h localhost || exit 1',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - keycloak_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: >
+      start-dev
+      --http-port=8080
+      --health-enabled=true
+      --http-management-port=9000
+      --http-management-host=0.0.0.0
+      --import-realm
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KC_DB_NAME:-keycloak}
+      KC_DB_USERNAME: ${KC_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:-keycloak}
+      KC_DB_SCHEMA: public
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    ports:
+      - '8081:8080'
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'curl -fs http://localhost:9000/health/ready || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    mem_limit: 800m
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - '${SERVER_PORT:-8080}:8080'
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE_NAME: ${DB_DATABASE_NAME}
+      SPRING_DATASOURCE_URL: 'jdbc:postgresql://${DB_HOST:-db}:${DB_PORT:-5432}/${DB_DATABASE_NAME}'
+
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+
+      MINIO_ENDPOINT: 'http://minio:9000'
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-feedbacks}
+
+      SERVER_PORT: ${SERVER_PORT}
+      SERVER_ADDRESS: 0.0.0.0
+
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://keycloak:8080/realms/clientspeak}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://keycloak:8080/realms/clientspeak/protocol/openid-connect/certs}
+
+      AI_ENABLED: ${AI_ENABLED}
+      AI_BASE_URL: ${AI_BASE_URL}
+      AI_API_KEY: ${AI_API_KEY}
+      AI_FOLDER_ID: ${AI_FOLDER_ID}
+      AI_PROMPT_ID: ${AI_PROMPT_ID}
+
+      JAVA_TOOL_OPTIONS: '-XX:MaxRAMPercentage=50 -XX:InitialRAMPercentage=25'
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    restart: on-failure
+    mem_limit: 1000m
+
+  parsing-worker:
+    build:
+      context: ./parsing-worker
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+      JOBS_TOPIC: ${JOBS_TOPIC}
+      LINKS_TOPIC: ${LINKS_TOPIC}
+      FEEDBACKS_TOPIC: ${FEEDBACKS_TOPIC}
+      PARSING_DONE_TOPIC: ${PARSING_DONE_TOPIC}
+    depends_on:
+      kafka:
+        condition: service_started
+      zookeeper:
+        condition: service_started
+    shm_size: '1gb'
+    tmpfs: [/run, /tmp]
+    healthcheck:
+      test: ['CMD-SHELL', 'ps aux | grep -v grep | grep node || exit 1']
+      interval: 20s
+      timeout: 10s
+      retries: 3
+    restart: on-failure
+    mem_limit: 2400m
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8081}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-clientspeak}
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-frontend}
+    depends_on:
+      - backend
+    ports:
+      - '3000:80'
+    restart: unless-stopped
 
 volumes:
   pgdata:
-    driver: local
+  keycloak_pgdata:
   minio_data:

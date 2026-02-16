@@ -21,4 +21,3 @@ drop table if exists status_model;
 drop function if exists update_parsing_job_status;
 drop function if exists clear_collected_objects_if_set_init_status;
 drop type if exists status_enum;
-drop function if exists create_stat_report;

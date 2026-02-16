@@ -1,0 +1,21 @@
+package ru.ifmo.se.clientspeak.bean;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import io.minio.MinioClient;
+
+@Configuration
+public class MinioClientBean {
+    @Bean
+    MinioClient minioClient(
+            @Value("${app.s3.endpoint}") String endpoint,
+            @Value("${app.s3.access-key}") String accessKey,
+            @Value("${app.s3.secret-key}") String secretKey) {
+        return MinioClient.builder()
+                .endpoint(endpoint)
+                .credentials(accessKey, secretKey)
+                .build();
+    }
+}

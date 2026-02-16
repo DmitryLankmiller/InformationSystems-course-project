@@ -222,7 +222,6 @@ CREATE TRIGGER reset_init_status
 AFTER UPDATE OF status ON parsing_job
 FOR EACH ROW EXECUTE FUNCTION clear_collected_objects_if_set_init_status();
 
-
 CREATE OR REPLACE FUNCTION create_stat_report(pj_id INTEGER)
 RETURNS INTEGER AS $$
 DECLARE
@@ -310,3 +309,6 @@ BEGIN
     RETURN stat_report_id;
 END;
 $$ LANGUAGE plpgsql;
+
+
+CREATE INDEX IF NOT EXISTS idx_feedback_object_pj ON feedback_object(parsing_job_id);
